@@ -3,7 +3,7 @@
     "@supabase/supabase-js": "^2.x.x",
     "cors": "^2.8.6",
     "express": "^5.2.1",
-    "jsonwebtoken":"^9.0.3",
+    "jsonwebtoken": "^9.0.3",
     "mysql": "^2.18.1",
     "websocket": "^1.0.35",
     "ws": "^8.20.0"
@@ -13,8 +13,8 @@
   "description": "",
   "main": "servidor.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
-    "start":"node servidor.js"
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "start": "node servidor.js"
   },
   "keywords": [],
   "author": "",
