@@ -1,9 +1,83 @@
 var express = require("express");
 var app = express();
-var conexion = require('./conexion_mysql.js');
 var ws = require('./servidor_ws.js');
 var jwt = require("jsonwebtoken");
 var SECRETO = process.env.JWT_SECRET || "secreto_de_desarrollo";
+
+// ============================================================
+// Conexión a PostgreSQL (Supabase)
+// Antes se usaba var conexion = require('./conexion_mysql.js'),
+// que hablaba con MySQL. Ahora la conexión vive aquí, en el
+// propio servidor REST, usando el driver "pg".
+// ============================================================
+require('dotenv').config();
+var { Pool } = require('pg');
+
+var pool = new Pool({
+    host: process.env.DB_HOST,
+    port: process.env.DB_PORT || 5432,
+    user: process.env.DB_USER,
+    password: process.env.DB_PASSWORD,
+    database: process.env.DB_NAME,
+    ssl: { rejectUnauthorized: false } // Supabase exige conexión SSL
+});
+
+pool.query('SELECT 1')
+    .then(function () {
+        console.log('Conectado a PostgreSQL correctamente');
+    })
+    .catch(function (err) {
+        console.error('Error en la conexión de la base de datos:', err);
+        process.exit();
+    });
+
+// Convierte los "?" de una consulta (estilo mysql) a "$1, $2, $3..." (estilo pg)
+function convertirPlaceholders(sql) {
+    var i = 0;
+    return sql.replace(/\?/g, function () {
+        i++;
+        return '$' + i;
+    });
+}
+
+// Mismo nombre y misma forma de llamar que antes: conexion.query(sql, valores, callback)
+// para que las rutas de más abajo no tengan que cambiar.
+var conexion = {
+    query: function (sql, valores, callback) {
+        if (typeof valores === 'function') {
+            callback = valores;
+            valores = [];
+        }
+
+        var sqlPg = convertirPlaceholders(sql);
+        var esInsert = /^\s*INSERT\s+INTO/i.test(sqlPg);
+
+        if (esInsert && !/RETURNING/i.test(sqlPg)) {
+            sqlPg += ' RETURNING id';
+        }
+
+        pool.query(sqlPg, valores, function (err, resultado) {
+            if (err) return callback(err);
+
+            if (esInsert) {
+                var insertId = resultado.rows[0] ? resultado.rows[0].id : undefined;
+                return callback(null, { insertId: insertId, affectedRows: resultado.rowCount });
+            }
+
+            if (/^\s*(UPDATE|DELETE)\s+/i.test(sqlPg)) {
+                return callback(null, { affectedRows: resultado.rowCount });
+            }
+
+            // SELECT (o cualquier otra consulta que devuelva filas)
+            callback(null, resultado.rows);
+        });
+    }
+};
+
+// ============================================================
+// A partir de aquí, todo el archivo sigue exactamente igual
+// que antes del cambio a PostgreSQL.
+// ============================================================
 
 app.use(express.json());
 
@@ -97,7 +171,7 @@ app.post("/api/gestores/login", function (req, res) {
         if (gestores.length === 1) {
             var token = jwt.sign({ id: gestores[0].id }, SECRETO, { expiresIn: "2h" });
             res.status(200).json({ id: gestores[0].id, token: token });
-}
+        }
         else res.status(403).json("Credenciales incorrectas");
     });
 });
@@ -114,9 +188,9 @@ app.post("/api/gestores", function (req, res) {
         var valores = [req.body.nombre, req.body.apellidos, req.body.login, req.body.password];
         conexion.query(sql, valores, function (err, resultado) {
             if (err) {
-            console.log("Error al crear el gestor", err);
-            return res.status(500).json("Error al crear el gestor");
-        }
+                console.log("Error al crear el gestor", err);
+                return res.status(500).json("Error al crear el gestor");
+            }
             res.status(201).json("Gestor creado");
         });
     });
@@ -151,9 +225,9 @@ app.put("/api/gestores/:id", function (req, res) {
             var sql = "UPDATE gestores SET nombre = ?, apellidos = ?, usuario = ?, password = ? WHERE id = ?";
             conexion.query(sql, [nombre, apellidos, usuario, password, req.params.id], function (err) {
                 if (err) {
-            console.log("Error al actualizar el gestor", err);
-            return res.status(500).json("Error al actualizar el gestor");
-        }
+                    console.log("Error al actualizar el gestor", err);
+                    return res.status(500).json("Error al actualizar el gestor");
+                }
                 res.status(200).json("Gestor actualizado");
             });
         }
@@ -161,9 +235,9 @@ app.put("/api/gestores/:id", function (req, res) {
         if (req.body.login && req.body.login !== g.usuario) {
             conexion.query("SELECT id FROM gestores WHERE usuario = ?", [req.body.login], function (err, existentes) {
                 if (err) {
-            console.log("Error al comprobar el usuario", err);
-            return res.status(500).json("Error al comprobar el usuario");
-        }
+                    console.log("Error al comprobar el usuario", err);
+                    return res.status(500).json("Error al comprobar el usuario");
+                }
                 if (existentes.length > 0) return res.status(400).json("Login en uso");
                 actualizar();
             });
@@ -244,7 +318,7 @@ app.post("/api/recursos", function (req, res) {
         var idNuevoRecurso = resultado.insertId;
         res.status(201).json("Recurso creado");
 
-        var idGestor = req.gestorId;   // antes: req.headers['x-gestor-id']
+        var idGestor = req.gestorId;
         getInfoRecurso(idNuevoRecurso, function (info) {
             if (!info) return;
             function avisar(origen) {
@@ -276,9 +350,9 @@ app.put("/api/recursos/:id", function (req, res) {
         var sql = "UPDATE recursos SET modelo = ?, ubicacion = ?, numero_serie = ?, estado = ? WHERE id = ?";
         conexion.query(sql, [modelo, ubicacion, numero_serie, estado, req.params.id], function (err) {
             if (err) {
-            console.log("Error al actualizar el recurso", err);
-            return res.status(500).json("Error al actualizar el recurso");
-        }
+                console.log("Error al actualizar el recurso", err);
+                return res.status(500).json("Error al actualizar el recurso");
+            }
             res.status(200).json("Actualizado");
         });
     });
