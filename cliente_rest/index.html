@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Gestión de Recursos Hospitalarios</title>
+    <style>
+        body { font-family: sans-serif; padding: 20px; }
+        .vista { display: none; border: 1px solid #ccc; padding: 20px; border-radius: 5px; }
+        .activo { display: block; }
+        .tabla-listado { width: 100%; border-collapse: collapse; margin-top: 10px; }
+        .tabla-listado th, .tabla-listado td { border: 1px solid #ddd; padding: 8px; text-align: left; }
+        
+        .res-blanco { background-color: white; }
+        .res-azul { background-color: #e6f3ff; } 
+        .res-rojo { background-color: #ffcccc; } 
+        .res-verde { background-color: #ccffcc; } 
+
+        
+        .aviso-rojo { background-color: #ffcccc; }
+        .aviso-azul { background-color: #cce5ff; }
+        .aviso-verde { background-color: #ccffcc; }
+        
+        label { display: inline-block; width: 100px; margin-top: 10px; }
+        #seccion-avisos { margin-top: 30px; }
+    </style>
+</head>
+<body>
+
+    <div id="vista-login" class="vista activo">
+        <h2>Acceso</h2>
+        Usuario: <input type="text" id="login_user"><br>
+        Contraseña: <input type="password" id="login_pass"><br><br>
+        <button onclick="hacerLogin()">Entrar</button> 
+        <button onclick="irRegistro()">Registrarse</button>
+    </div>
+
+    <div id="vista-registro" class="vista">
+        <h2 id="titulo-registro">Datos Gestor</h2>
+        Nombre: <input type="text" id="reg_nombre"><br>
+        Apellidos: <input type="text" id="reg_apellidos"><br>
+        Login: <input type="text" id="reg_user"><br>
+        Contraseña: <input type="password" id="reg_pass"><br><br>
+        <button onclick="guardarGestor()">Guardar</button>
+        <button onclick="cancelarRegistro()">Cancelar</button>
+    </div>
+
+    <div id="vista-inicio" class="vista">
+        <h2>Inicio</h2>
+        <div id="bienvenida"></div>
+        <button onclick="editarPerfil()">Editar datos</button>
+        <button onclick="salir()">Salir</button>
+        <hr>
+        <h3>Búsqueda de recursos</h3>
+        Categoría: <select id="bus_cat"><option value="Todos">Todos</option></select><br>
+        Modelo: <select id="bus_mod"><option value="Todos">Todos</option></select><br>
+        Ubicación: <select id="bus_ubi"><option value="Todos">Todos</option></select><br>
+        Estado: <select id="bus_est">
+            <option value="Todos">Todos</option>
+            <option value="0">Operativo</option>
+            <option value="1">Baja</option>
+            <option value="2">Mantenimiento</option>
+        </select><br><br>
+        <button onclick="buscarRecursos()">Buscar</button>
+        
+        <h3>Recursos</h3>
+        <table class="tabla-listado">
+            <thead>
+                <tr><th>N. Serie</th><th>Categoría</th><th>Modelo</th><th>Ubicación</th><th>Estado</th><th>Acciones</th></tr>
+            </thead>
+            <tbody id="tabla-recursos-body"></tbody>
+        </table>
+        <br>
+        <button onclick="nuevoRecurso()">Añadir Recurso</button>
+
+        <h3>Ministerio de Sanidad</h3>
+        <button onclick="enviarAlMinisterio()">Enviar reservas al Ministerio</button>
+
+        <h3>Ranking de reservas por área médica</h3>
+        <table class="tabla-listado">
+            <thead><tr><th>#</th><th>Área Médica</th><th>Reservas Totales</th></tr></thead>
+            <tbody id="tabla-ranking"></tbody>
+        </table>
+        
+        <div id="seccion-avisos">
+            <h3>Avisos</h3>
+            <table class="tabla-listado">
+                <thead>
+                    <tr><th>Fecha</th><th>Origen</th><th>Aviso</th></tr>
+                </thead>
+                <tbody id="tabla-avisos"></tbody>
+            </table>
+        </div>
+    </div>
+
+    <div id="vista-recurso" class="vista">
+        <h2>Recurso</h2>
+        <input type="hidden" id="rec_id">
+        <h3>Datos recurso</h3>
+        Categoría: <select id="rec_cat" onchange="filtrarModelosEnFicha()"></select><br>
+        Modelo: <select id="rec_mod"></select><br>
+        Núm. Serie: <input type="text" id="rec_serie"><br>
+        Ubicación: <select id="rec_ubi"></select><br>
+        Estado: <select id="rec_estado">
+            <option value="0">Operativo</option>
+            <option value="1">Baja</option>
+            <option value="2">Mantenimiento</option>
+        </select><br><br>
+        <button onclick="guardarRecurso()">Guardar</button>
+
+
+
+
+
+        <div id="seccion-reservas-resenyas">
+            <h3>Reservas</h3>
+            <table class="tabla-listado">
+                <thead><tr><th>Sanitario</th><th>H. estim</th><th>F. Petición</th><th>F. Inicio</th><th>F. Fin</th></tr></thead>
+                <tbody id="tabla-reservas"></tbody>
+            </table>
+            <h4>Nueva Reserva</h4>
+                Sanitario: <input type="number" id="reserva_sanitario" min="1" value="1"><br>
+                Horas estimadas: <input type="number" id="reserva_horas" min="1" value="1"><br><br>
+                <button onclick="crearReserva()">Añadir Reserva</button>
+
+            <h3>Reseñas</h3>
+            <table class="tabla-listado">
+                <thead><tr><th>Fecha</th><th>Sanitario</th><th>Valoración</th><th>Comentario</th></tr></thead>
+                <tbody id="tabla-resenyas"></tbody>
+            </table>
+            <h4>Nueva Reseña</h4>
+                Sanitario: <input type="number" id="resenya_sanitario" min="1" value="1"><br>
+                Valoración (1-5): <input type="number" id="resenya_valor" min="1" max="5" value="5"><br>
+                Comentario: <input type="text" id="resenya_desc" style="width: 250px;"><br><br>
+                <button onclick="crearResenya()">Añadir Reseña</button>
+
+        </div>
+
+        <br>
+        <button onclick="irInicio()">Volver al listado</button>
+    </div>
+
+    <script src="rest.js"></script>
+    <script src="main.js"></script>
+</body>
+</html>
