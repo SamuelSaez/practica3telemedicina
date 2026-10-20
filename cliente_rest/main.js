@@ -373,8 +373,9 @@ function crearResenya() {
     });
 }
 
-
 // ---------- Ministerio de Sanidad (todo desde el cliente) ----------
+// BLOQUE COMPLETO: sustituye todo lo que tenías de "Ministerio" por esto.
+
 const MINISTERIO = "https://undefined.ua.es/telemedicina/api/datos"; // confirmar URL real
 
 const AREAS = {
@@ -384,6 +385,13 @@ const AREAS = {
     13: "Oftalmología", 14: "Oncología", 15: "Pediatría", 16: "Psiquiatría",
     17: "Traumatología", 18: "Urología"
 };
+
+// Define aquí el ID del área asignada a tu grupo
+const MI_AREA = 5;
+
+let enviandoMinisterio = false; // evita doble envío por doble clic
+
+// ---------- Utilidades ----------
 
 // rest.get con promesa, para poder usar await dentro de los bucles
 function restGet(url) {
@@ -395,30 +403,84 @@ function restGet(url) {
     });
 }
 
-// Define aquí el ID del área asignada a tu grupo
-const MI_AREA = 5; 
+function esTextoValido(t) {
+    return typeof t === "string" && t.trim() !== "";
+}
+
+function esFechaValida(f) {
+    return f !== null && f !== undefined && f !== "" && !isNaN(new Date(f).getTime());
+}
+
+function esAreaValida(id) {
+    const n = Number(id);
+    return Number.isInteger(n) && AREAS[n] !== undefined;
+}
+
+// Valida UNA reserva en el formato que se envía al Ministerio.
+// fec_ini y fecha_fin pueden ser null (reserva pendiente o en curso),
+// pero si traen valor tiene que ser una fecha válida.
+function esReservaValida(d) {
+    if (!d || typeof d !== "object") return false;
+    const horas = Number(d.horas_estimadas);
+    return esTextoValido(d.nombre) &&
+        esTextoValido(d.apellidos) &&
+        esTextoValido(d["categoría"]) &&
+        Number.isFinite(horas) && horas > 0 &&
+        esFechaValida(d.fec_pet) &&
+        (d.fec_ini === null || d.fec_ini === undefined || esFechaValida(d.fec_ini)) &&
+        (d.fecha_fin === null || d.fecha_fin === undefined || esFechaValida(d.fecha_fin));
+}
+
+// Clave para detectar la misma reserva repetida (mismos datos exactos)
+function claveReserva(d) {
+    return [d.nombre, d.apellidos, d["categoría"], d.horas_estimadas,
+        d.fec_pet, d.fec_ini, d.fecha_fin].join("|");
+}
+
+// ---------- Enviar ----------
 
 async function enviarAlMinisterio() {
+    if (enviandoMinisterio) return;
+
+    // El área tiene que ser una de las disponibles
+    if (!esAreaValida(MI_AREA)) {
+        alert("El área " + MI_AREA + " no es una de las áreas disponibles (1-18)");
+        return;
+    }
+
+    enviandoMinisterio = true;
     try {
+        // Pedimos aquí los catálogos para no depender de variables globales
+        const catalogoModelos = await restGet("/api/modelos");
+        const catalogoCategorias = await restGet("/api/categorias");
         const recursos = await restGet("/api/recursos");
+
         const listaDatos = [];
-        const sanitarios = {}; // Caché para no repetir peticiones GET de sanitarios
+        const idsVistos = new Set();   // no repetir la misma reserva (por id)
+        const sanitarios = {};         // caché de sanitarios
+        let descartadas = 0;
 
         for (const rec of recursos) {
-            const mod = modelos.find(m => m.id == rec.modelo);
-            const cat = mod ? categorias.find(c => c.id == mod.categoria) : null;
-            const nombreCat = cat ? cat.nombre : "-";
+            const mod = catalogoModelos.find(m => m.id == rec.modelo);
+            const cat = mod ? catalogoCategorias.find(c => c.id == mod.categoria) : null;
+            const nombreCat = cat ? cat.nombre : null;
 
             const reservas = await restGet("/api/recursos/" + rec.id + "/reservas");
             for (const r of reservas) {
-                // Obtener datos del sanitario
-                if (!sanitarios[r.sanitario]) {
-                    sanitarios[r.sanitario] = await restGet("/api/sanitarios/" + r.sanitario);
+                if (idsVistos.has(r.id)) continue;
+                idsVistos.add(r.id);
+
+                // Si falla la consulta de un sanitario, se descarta solo esa reserva
+                if (!(r.sanitario in sanitarios)) {
+                    try {
+                        sanitarios[r.sanitario] = await restGet("/api/sanitarios/" + r.sanitario);
+                    } catch (e) {
+                        sanitarios[r.sanitario] = null;
+                    }
                 }
                 const san = sanitarios[r.sanitario];
 
-                // Todas las reservas van directamente al área de tu grupo
-                listaDatos.push({
+                const dato = san ? {
                     nombre: san.nombre,
                     apellidos: san.apellidos,
                     "categoría": nombreCat,
@@ -426,18 +488,24 @@ async function enviarAlMinisterio() {
                     fec_pet: r.fecha_peticion,
                     fec_ini: r.fecha_inicio,
                     fecha_fin: r.fecha_fin
-                });
+                } : null;
+
+                if (!esReservaValida(dato)) {
+                    descartadas++;
+                    continue;
+                }
+                listaDatos.push(dato);
             }
         }
 
         if (listaDatos.length === 0) {
-            alert("No hay reservas que enviar");
+            alert("No hay reservas válidas que enviar" +
+                (descartadas ? " (" + descartadas + " descartadas por datos incorrectos)" : ""));
             return;
         }
 
         const hoy = new Date().toLocaleDateString("sv-SE"); // YYYY-MM-DD
-        
-        // Un solo POST enviando tu área fija y todas las reservas
+
         const resp = await fetch(MINISTERIO, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -450,13 +518,18 @@ async function enviarAlMinisterio() {
 
         if (!resp.ok) throw new Error("El Ministerio rechazó el envío (" + resp.status + ")");
 
-        alert("Enviadas " + listaDatos.length + " reservas para el área " + (AREAS[MI_AREA] || MI_AREA));
+        alert("Enviadas " + listaDatos.length + " reservas para el área " + AREAS[MI_AREA] +
+            (descartadas ? ". Descartadas por datos incorrectos: " + descartadas : ""));
         cargarRanking();
     } catch (e) {
         console.error(e);
         alert("Error al enviar al Ministerio: " + e.message);
+    } finally {
+        enviandoMinisterio = false;
     }
 }
+
+// ---------- Ranking (valida lo que han subido los demás) ----------
 
 async function cargarRanking() {
     const tbody = document.getElementById('tabla-ranking');
@@ -472,16 +545,52 @@ async function cargarRanking() {
             ? datos
             : Object.keys(datos).map(id => ({ id_area: id, datos: datos[id] }));
 
-        // Bucle: contar reservas por área
+        // Todas las áreas empiezan en 0, así salen las 18 aunque alguna no tenga envíos
         const conteo = {};
+        Object.keys(AREAS).forEach(id => { conteo[id] = 0; });
+        const vistas = {};     // por área, claves de reservas ya contadas
+        let descartadas = 0;
+
         for (const envio of envios) {
-            const n = Array.isArray(envio.datos) ? envio.datos.length : 0;
-            conteo[envio.id_area] = (conteo[envio.id_area] || 0) + n;
+            // 1) El área tiene que existir entre las disponibles
+            if (!envio || !esAreaValida(envio.id_area)) {
+                descartadas += (envio && Array.isArray(envio.datos)) ? envio.datos.length : 1;
+                continue;
+            }
+            const area = Number(envio.id_area);
+
+            // 2) "datos" tiene que ser una lista
+            if (!Array.isArray(envio.datos)) {
+                descartadas++;
+                continue;
+            }
+
+            if (!vistas[area]) vistas[area] = new Set();
+
+            for (const d of envio.datos) {
+                // 3) Campos vacíos o incorrectos: no cuenta
+                if (!esReservaValida(d)) {
+                    descartadas++;
+                    continue;
+                }
+                // 4) Misma reserva repetida (mismos datos exactos): solo cuenta una vez
+                const clave = claveReserva(d);
+                if (vistas[area].has(clave)) {
+                    descartadas++;
+                    continue;
+                }
+                vistas[area].add(clave);
+                conteo[area] = (conteo[area] || 0) + 1;
+            }
+        }
+
+        if (descartadas > 0) {
+            console.warn("Ranking: " + descartadas + " reservas descartadas por datos incorrectos o repetidos");
         }
 
         const ranking = Object.keys(conteo)
-            .map(id => ({ area: AREAS[id] || ("Área " + id), total: conteo[id] }))
-            .sort((a, b) => b.total - a.total);
+            .map(id => ({ area: AREAS[id], total: conteo[id] }))
+            .sort((a, b) => b.total - a.total || a.area.localeCompare(b.area)); // empates: orden alfabético
 
         ranking.forEach(function (r, i) {
             tbody.innerHTML += `<tr>
